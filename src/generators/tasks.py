@@ -1,4 +1,5 @@
 import random
+import logging
 from typing import List, Tuple, Dict
 from datetime import datetime, timedelta
 from src.models.models import Task, Story, Project, Section, User, TeamMembership
@@ -42,6 +43,37 @@ def generate_tasks(
         else:
             project_members[p.id] = users # Fallback: anyone can check it out
 
+    # --- POOLING STRATEGY ---
+    # To avoid 13+ hours of LLM calls, we generate pools of task names per category
+    # and sample from them. This is also realistic (many tasks have same names).
+    logging.info("Generating Task Name Pools (Performance Optimization)...")
+    task_pools = {
+        "Engineering": [],
+        "Marketing": [], 
+        "Product": [],
+        "Design": [],
+        "Sales": [],
+        "Generic": []
+    }
+    
+    # Populate pools
+    for category in task_pools.keys():
+        # Generate ~20-30 unique names per category
+        count = 30
+        for _ in range(count):
+            prompt = f"Generate a short, realistic task name for a {category} team. Output just the task name."
+             # We rely on temperature=0.9 for variety, or the fallback list if no API key
+            name = generate_text(prompt, temperature=0.9).strip().replace('"','')
+            task_pools[category].append(name)
+            
+    # Simple keyword matching to guess category from project name
+    def get_pool_category(project_name):
+        p_lower = project_name.lower()
+        for cat in task_pools.keys():
+            if cat.lower() in p_lower:
+                return cat
+        return "Generic"
+
     for project in projects:
         p_sections = project_sections.get(project.id, [])
         if not p_sections:
@@ -50,15 +82,15 @@ def generate_tasks(
         # Determine number of tasks
         num_tasks = random.randint(5, 25) # simplified distribution
         
-        # Batch Generate Task Names via LLM for speed/efficiency (optional optimization)
-        # For now, we do one by one or small batches.
+        # Get appropriate pool
+        pool_cat = get_pool_category(project.name)
+        current_pool = task_pools.get(pool_cat, task_pools["Generic"])
         
         for _ in range(num_tasks):
             section = random.choice(p_sections)
             
-            # 1. Content
-            prompt = f"Generate a short, realistic task name for a project named '{project.name}' in the '{section.name}' stage. Department context: {project.name}. Output just the task name."
-            name = generate_text(prompt, temperature=0.9).strip().replace('"','')
+            # 1. Content - Sample from Pool
+            name = random.choice(current_pool)
             
             # 2. Assignee
             possible_assignees = project_members.get(project.id, users)

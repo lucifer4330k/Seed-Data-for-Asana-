@@ -25,12 +25,33 @@ def generate_text(prompt: str, temperature: float = 0.7, model_name: str = "gemi
         # Fallback for when no key is present - Use realistic pre-canned data
         p_lower = prompt.lower()
         if "task name" in p_lower:
-            options = ["Fix race condition", "Update docs", "Client meeting", "Budget review", "Refactor API", "Design Review", "Deploy to prod", "Write tests"]
+            options = [
+                # Engineering
+                "Fix race condition", "Update docs", "Client meeting", "Budget review", "Refactor API", "Design Review", 
+                "Deploy to prod", "Write tests", "Optimize DB queries", "Fix CSS layout bug", "Upgrade React version",
+                "Investigate memory leak", "Setup CI/CD", "Resolve merge conflicts", "Code review PR #405",
+                # Marketing
+                "Draft social copy", "Review ad performance", "Plan webinar", "Update landing page", "Keyword research",
+                "Competitor analysis", "Email campaign draft", "Coordinate with influencers", "Prepare Q3 deck",
+                # Product/Design
+                "User interviews", "Wireframe new dashboard", "Update prototype", "Synthesize feedback", "Roadmap planning",
+                "Backlog grooming", "Sprint planning", "Retrospective", "Stakeholder sync", "Feature specification"
+            ]
             return random.choice(options)
         elif "comment" in p_lower:
-             return random.choice(["Looking into it.", "Done.", "Can you review?", "Blocked.", "Nice work!"])
+             return random.choice([
+                 "Looking into it.", "Done.", "Can you review?", "Blocked.", "Nice work!",
+                 "Can we discuss this?", "Marking as duplicate.", "Deployed to staging.", "Ready for QA.",
+                 "Please see attached screenshot.", "I'll handle this.", "LGTM!", "Needs more info."
+             ])
         elif "description" in p_lower:
-            return random.choice(["Detailed description here.", "See attached doc.", "", "Priority fix."])
+            return random.choice([
+                "Detailed description here.", "See attached doc.", "", "Priority fix.", 
+                "Please implement as per the design spec found in Figma.", 
+                "User reported this issue on the support channel.",
+                "This needs to be done before the end of the sprint.",
+                "Refactoring the legacy codebase to improve maintainability."
+            ])
         return f"Task related to: {prompt[:30]}"
 
     try:
