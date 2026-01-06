@@ -7,6 +7,32 @@ from src.utils.llm import generate_text
 from src.utils.dates import random_date_in_range, get_business_day
 from src.config import UNASSIGNED_TASK_RATE, GOOGLE_API_KEY
 
+# Add these pools at the top of the file
+TASK_NAME_POOL = []
+COMMENT_POOL = []
+
+def ensure_pools_populated():
+    if not TASK_NAME_POOL:
+        # Generate a batch of generic task names ONCE
+        try:
+            prompt = "List 50 realistic, short task names for a tech company (e.g. 'Fix login bug', 'Q3 Budget', 'Design Review'). Output just the names."
+            text = generate_text(prompt)
+            TASK_NAME_POOL.extend([line.strip("- ").strip() for line in text.split('\n') if line.strip()])
+        except Exception as e:
+            logging.warning(f"LLM failed for task pool: {e}")
+            # Fallback if API completely fails
+            TASK_NAME_POOL.extend(["Fix bug", "Update docs", "Meeting", "Review PR", "Deploy", "Test Feature"])
+
+    if not COMMENT_POOL:
+        # Generate a batch of comments ONCE
+        try:
+            prompt = "List 30 short professional comments (e.g. 'Done', 'Looking into it', 'Blocked')."
+            text = generate_text(prompt)
+            COMMENT_POOL.extend([line.strip("- ").strip() for line in text.split('\n') if line.strip()])
+        except Exception as e:
+            logging.warning(f"LLM failed for comment pool: {e}")
+            COMMENT_POOL.extend(["Done", "Looking into it", "Blocked", "Nice work"])
+
 def generate_tasks(
     workspace_id: str, 
     projects: List[Project], 
@@ -14,6 +40,9 @@ def generate_tasks(
     users: List[User],
     team_memberships: List[TeamMembership]
 ) -> Tuple[List[Task], List[Story]]:
+    
+    # 1. Initialize pools
+    ensure_pools_populated()
     
     tasks = []
     stories = []
@@ -26,9 +55,8 @@ def generate_tasks(
         project_sections[s.project_id].append(s)
         
     # Map project -> consistent team members (for assignment)
-    # We find which team the project belongs to, then find users in that team
     project_members = {}
-    team_user_map = {} # team_id -> [user_ids]
+    team_user_map = {} 
     for tm in team_memberships:
         if tm.team_id not in team_user_map:
             team_user_map[tm.team_id] = []
@@ -37,54 +65,23 @@ def generate_tasks(
     for p in projects:
         t_id = p.team_id
         if t_id and t_id in team_user_map:
-            # Filter users list to get actual User objects
             member_ids = team_user_map[t_id]
             project_members[p.id] = [u for u in users if u.id in member_ids]
         else:
-            project_members[p.id] = users # Fallback: anyone can check it out
-
-    # --- POOLING STRATEGY (OPTIMIZED v2) ---
-    logging.info("Initializing Task & Comment Pools (Performance Super-Optimization)...")
-    task_pool = {}
-    comment_pool = []
-
-    def get_cached_task_names(project_name, section_name):
-        """Generates 20 names at once and caches them to avoid N+1 API calls."""
-        key = f"{project_name}-{section_name}"
-        if key not in task_pool:
-            # Ask LLM for a BATCH of names
-            prompt = f"List 20 realistic, short task names for a '{project_name}' project in the '{section_name}' phase. Return just the names, one per line."
-            text = generate_text(prompt, temperature=0.9)
-            # Split by newlines and clean up
-            names = [line.strip().lstrip('- ').strip() for line in text.split('\n') if line.strip()]
-            task_pool[key] = names if names else ["Generic Task"]
-        return task_pool[key]
-
-    # Pre-fill comment pool ONCE
-    c_prompt = "Generate 50 short, professional comments for a project management tool (e.g., 'Looking into it', 'Done', 'Fixed'). One per line."
-    c_text = generate_text(c_prompt)
-    comment_pool.extend([l.strip().lstrip('- ').strip() for l in c_text.split('\n') if l.strip()])
-    if not comment_pool:
-        comment_pool = ["Looking into it.", "Done.", "Can you review?", "Blocked.", "Nice work!"]
+            project_members[p.id] = users 
 
     for project in projects:
         p_sections = project_sections.get(project.id, [])
         if not p_sections:
             continue
             
-        # Determine number of tasks
-        num_tasks = random.randint(15, 45) 
-        
-        # 1. OPTIMIZATION: Get the pool of names for this specific project context
-        # We pick one section usage as the 'context' for the batch, or we could rotate.
-        # To match user request of "project context", we'll just query once per project/section combo lazily
+        num_tasks = random.randint(15, 45)
         
         for _ in range(num_tasks):
             section = random.choice(p_sections)
             
-            # 2. FAST GENERATION: Pick from pool instead of calling API
-            available_names = get_cached_task_names(project.name, section.name)
-            name = random.choice(available_names)
+            # 2. FAST FIX: Pick from pool instead of calling API
+            name = random.choice(TASK_NAME_POOL) if TASK_NAME_POOL else "General Task"
             
             # 2. Assignee
             possible_assignees = project_members.get(project.id, users)
@@ -92,7 +89,7 @@ def generate_tasks(
                 assignee_id = None
             else:
                 assignee_id = random.choice(possible_assignees).id
-                
+            
             # 3. Dates & Status
             created_at = random_date_in_range(project.created_at, datetime.now())
             
@@ -107,17 +104,14 @@ def generate_tasks(
             elif "backlog" in lower_sec:
                 due_date = None
             else:
-                # In progress
                 due_date = (created_at + timedelta(days=random.randint(1, 14))).date()
                 if due_date < datetime.now().date():
                      if random.random() > 0.2:
                          due_date = (datetime.now() + timedelta(days=random.randint(1, 7))).date()
 
-            # Ensure logic: completed_at > created_at
             if completed_at and completed_at < created_at:
                 completed_at = created_at + timedelta(hours=random.randint(1, 48))
 
-            # Null Entropy
             description = f"Task description for {name}. Generated by simulation."
             if random.random() < 0.1: 
                 description = None
@@ -136,13 +130,13 @@ def generate_tasks(
             )
             tasks.append(task)
             
-            # 4. FAST COMMENTS: Pick from pool
-            if random.random() < 0.4: 
+            # 3. FAST FIX: Comments from pool
+            if random.random() < 0.4:
                 num_comments = random.randint(1, 3)
                 for _ in range(num_comments):
-                    commenter = random.choice(possible_assignees) if possible_assignees else random.choice(users)
-                    c_text = random.choice(comment_pool)
+                    c_text = random.choice(COMMENT_POOL) if COMMENT_POOL else "Looking into it."
                     
+                    commenter = random.choice(possible_assignees) if possible_assignees else random.choice(users)
                     story = Story(
                         target_id=task.id,
                         text=c_text,

@@ -1,3 +1,4 @@
 faker
 google-generativeai
 python-dotenv
+pandas
