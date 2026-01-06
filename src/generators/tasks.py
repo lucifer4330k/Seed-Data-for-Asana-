@@ -43,36 +43,29 @@ def generate_tasks(
         else:
             project_members[p.id] = users # Fallback: anyone can check it out
 
-    # --- POOLING STRATEGY ---
-    # To avoid 13+ hours of LLM calls, we generate pools of task names per category
-    # and sample from them. This is also realistic (many tasks have same names).
-    logging.info("Generating Task Name Pools (Performance Optimization)...")
-    task_pools = {
-        "Engineering": [],
-        "Marketing": [], 
-        "Product": [],
-        "Design": [],
-        "Sales": [],
-        "Generic": []
-    }
-    
-    # Populate pools
-    for category in task_pools.keys():
-        # Generate ~20-30 unique names per category
-        count = 30
-        for _ in range(count):
-            prompt = f"Generate a short, realistic task name for a {category} team. Output just the task name."
-             # We rely on temperature=0.9 for variety, or the fallback list if no API key
-            name = generate_text(prompt, temperature=0.9).strip().replace('"','')
-            task_pools[category].append(name)
-            
-    # Simple keyword matching to guess category from project name
-    def get_pool_category(project_name):
-        p_lower = project_name.lower()
-        for cat in task_pools.keys():
-            if cat.lower() in p_lower:
-                return cat
-        return "Generic"
+    # --- POOLING STRATEGY (OPTIMIZED v2) ---
+    logging.info("Initializing Task & Comment Pools (Performance Super-Optimization)...")
+    task_pool = {}
+    comment_pool = []
+
+    def get_cached_task_names(project_name, section_name):
+        """Generates 20 names at once and caches them to avoid N+1 API calls."""
+        key = f"{project_name}-{section_name}"
+        if key not in task_pool:
+            # Ask LLM for a BATCH of names
+            prompt = f"List 20 realistic, short task names for a '{project_name}' project in the '{section_name}' phase. Return just the names, one per line."
+            text = generate_text(prompt, temperature=0.9)
+            # Split by newlines and clean up
+            names = [line.strip().lstrip('- ').strip() for line in text.split('\n') if line.strip()]
+            task_pool[key] = names if names else ["Generic Task"]
+        return task_pool[key]
+
+    # Pre-fill comment pool ONCE
+    c_prompt = "Generate 50 short, professional comments for a project management tool (e.g., 'Looking into it', 'Done', 'Fixed'). One per line."
+    c_text = generate_text(c_prompt)
+    comment_pool.extend([l.strip().lstrip('- ').strip() for l in c_text.split('\n') if l.strip()])
+    if not comment_pool:
+        comment_pool = ["Looking into it.", "Done.", "Can you review?", "Blocked.", "Nice work!"]
 
     for project in projects:
         p_sections = project_sections.get(project.id, [])
@@ -80,17 +73,18 @@ def generate_tasks(
             continue
             
         # Determine number of tasks
-        num_tasks = random.randint(5, 25) # simplified distribution
+        num_tasks = random.randint(15, 45) 
         
-        # Get appropriate pool
-        pool_cat = get_pool_category(project.name)
-        current_pool = task_pools.get(pool_cat, task_pools["Generic"])
+        # 1. OPTIMIZATION: Get the pool of names for this specific project context
+        # We pick one section usage as the 'context' for the batch, or we could rotate.
+        # To match user request of "project context", we'll just query once per project/section combo lazily
         
         for _ in range(num_tasks):
             section = random.choice(p_sections)
             
-            # 1. Content - Sample from Pool
-            name = random.choice(current_pool)
+            # 2. FAST GENERATION: Pick from pool instead of calling API
+            available_names = get_cached_task_names(project.name, section.name)
+            name = random.choice(available_names)
             
             # 2. Assignee
             possible_assignees = project_members.get(project.id, users)
@@ -113,19 +107,17 @@ def generate_tasks(
             elif "backlog" in lower_sec:
                 due_date = None
             else:
-                # In progress / To Do
-                # Set due date near future or recent past
+                # In progress
                 due_date = (created_at + timedelta(days=random.randint(1, 14))).date()
                 if due_date < datetime.now().date():
-                     # 20% Chance it's overdue, otherwise we bump it
                      if random.random() > 0.2:
                          due_date = (datetime.now() + timedelta(days=random.randint(1, 7))).date()
 
-            # Ensure logic: completed_at must be > created_at
+            # Ensure logic: completed_at > created_at
             if completed_at and completed_at < created_at:
                 completed_at = created_at + timedelta(hours=random.randint(1, 48))
 
-            # Null Entropy: 10% of tasks have no description
+            # Null Entropy
             description = f"Task description for {name}. Generated by simulation."
             if random.random() < 0.1: 
                 description = None
@@ -144,13 +136,12 @@ def generate_tasks(
             )
             tasks.append(task)
             
-            # 4. Comments (Stories)
-            if random.random() < 0.4: # 40% of tasks have comments
+            # 4. FAST COMMENTS: Pick from pool
+            if random.random() < 0.4: 
                 num_comments = random.randint(1, 3)
                 for _ in range(num_comments):
                     commenter = random.choice(possible_assignees) if possible_assignees else random.choice(users)
-                    c_prompt = f"Write a very short professional comment about the task '{name}' in a project management tool."
-                    c_text = generate_text(c_prompt, temperature=0.7).strip().replace('"','')
+                    c_text = random.choice(comment_pool)
                     
                     story = Story(
                         target_id=task.id,
@@ -159,5 +150,5 @@ def generate_tasks(
                         created_at=random_date_in_range(created_at, datetime.now())
                     )
                     stories.append(story)
-
+    
     return tasks, stories

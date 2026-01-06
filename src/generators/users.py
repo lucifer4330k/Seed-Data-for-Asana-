@@ -55,6 +55,7 @@ def generate_teams(workspace_id: str, users: List[User]) -> Tuple[List[Team], Li
     memberships = []
     
     # Create one team per department
+    dept_teams = {}
     for dept in DEPARTMENTS:
         team = Team(
             name=f"{dept} Team",
@@ -62,21 +63,49 @@ def generate_teams(workspace_id: str, users: List[User]) -> Tuple[List[Team], Li
             description=f"The {dept} department team."
         )
         teams.append(team)
+        dept_teams[dept] = team
         
         # Add users to their department team
         dept_users = [u for u in users if u.department == dept]
         for user in dept_users:
             memberships.append(TeamMembership(user_id=user.id, team_id=team.id))
             
-    # thorough cross-functional teams
-    cross_functional_teams = ["Growth Squad", "Mobile App Launch", "Enterprise Security"]
-    for t_name in cross_functional_teams:
-        team = Team(name=t_name, workspace_id=workspace_id, description="Cross-functional project team")
-        teams.append(team)
-        # Add random users
-        squad_size = random.randint(5, 15)
-        squad_users = random.sample(users, k=min(len(users), squad_size))
-        for user in squad_users:
-             memberships.append(TeamMembership(user_id=user.id, team_id=team.id))
+    # --- SCALING: Generate Squads (Small Teams) ---
+    # Aim for ~10 users per squad to act as project units.
+    # Total squads approx len(users) / 10
+    logging.info("Generating Squads (Scaling Teams)...")
+    squad_names = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta", "Iota", "Kappa", "Phoenix", "Dragon", "Tiger", "Eagle", "Lion", "Wolf", "Bear", "Shark", "Whale", "Dolphin"]
+    
+    for dept in DEPARTMENTS:
+        d_users = [u for u in users if u.department == dept]
+        # Shuffle
+        random.shuffle(d_users)
+        
+        # Chunk into squads of 5-15
+        i = 0
+        squad_idx = 1
+        while i < len(d_users):
+            squad_size = random.randint(5, 15)
+            chunk = d_users[i : i + squad_size]
+            i += squad_size
+            
+            if not chunk:
+                break
+                
+            s_name = f"{dept} Squad {squad_idx}"
+            if squad_idx <= len(squad_names):
+                s_name = f"{dept} {squad_names[squad_idx-1]}"
+                
+            team = Team(
+                name=s_name,
+                workspace_id=workspace_id,
+                description=f"Squad within {dept}"
+            )
+            teams.append(team)
+            
+            for u in chunk:
+                 memberships.append(TeamMembership(user_id=u.id, team_id=team.id))
+            
+            squad_idx += 1
 
     return teams, memberships
