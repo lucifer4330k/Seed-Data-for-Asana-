@@ -47,7 +47,7 @@ def verify():
     # 3. Null Check
     null_desc = conn.execute("SELECT COUNT(*) FROM tasks WHERE description IS NULL").fetchone()[0]
     total_tasks = len(tasks_dates)
-    print(f"Tasks with NULL Description: {null_desc} ({null_desc/total_tasks*100:.1f}%)")
+    print(f"Empty Descriptions (Intentional Entropy): {null_desc} ({null_desc/total_tasks*100:.1f}%)")
     
     # 4. Mock Content Check
     mock_content = conn.execute("SELECT COUNT(*) FROM tasks WHERE name LIKE '%[MOCK CONTENT]%' OR description LIKE '%[MOCK CONTENT]%'").fetchone()[0]
